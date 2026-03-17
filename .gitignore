@@ -49,3 +49,5 @@ Thumbs.db
 *~
 .vscode/
 *.code-workspace
+
+commit_msg.txt
