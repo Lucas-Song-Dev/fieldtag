@@ -1,0 +1,51 @@
+# ─── Android / Gradle ─────────────────────────────────────────────────────────
+*.iml
+.gradle/
+local.properties
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/gradle.xml
+.idea/assetWizardSettings.xml
+.idea/dictionaries
+.idea/libraries
+.idea/caches
+.idea/shelf
+
+# Android Studio generated files
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs
+**/build/
+**/out/
+
+# Generated APKs / bundles
+*.apk
+*.ap_
+*.aab
+
+# Kotlin / Java compiled files
+*.class
+
+# Keystore / secrets — never commit these
+keystore.properties
+*.jks
+*.keystore
+
+# Gradle caches (keep wrapper scripts + jar)
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+!gradlew
+!gradlew.bat
+
+# IDE / OS artefacts
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*.tmp
+*~
+.vscode/
+*.code-workspace
