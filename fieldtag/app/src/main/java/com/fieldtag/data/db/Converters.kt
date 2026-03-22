@@ -5,6 +5,7 @@ import com.fieldtag.data.db.entities.FieldStatus
 import com.fieldtag.data.db.entities.MediaRole
 import com.fieldtag.data.db.entities.MediaSource
 import com.fieldtag.data.db.entities.MediaType
+import com.fieldtag.data.db.entities.OverlayShape
 import com.fieldtag.data.db.entities.ParseStatus
 import com.fieldtag.data.db.entities.ProjectStatus
 
@@ -27,4 +28,8 @@ class Converters {
 
     @TypeConverter fun mediaSourceToString(value: MediaSource): String = value.name
     @TypeConverter fun stringToMediaSource(value: String): MediaSource = MediaSource.valueOf(value)
+
+    @TypeConverter fun overlayShapeToString(value: OverlayShape): String = value.name
+    @TypeConverter fun stringToOverlayShape(value: String): OverlayShape =
+        runCatching { OverlayShape.valueOf(value) }.getOrDefault(OverlayShape.RECTANGLE)
 }

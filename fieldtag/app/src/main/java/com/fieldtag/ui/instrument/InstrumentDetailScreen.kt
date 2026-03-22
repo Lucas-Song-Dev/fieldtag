@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,13 +44,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.fieldtag.data.db.entities.FieldStatus
 import com.fieldtag.data.db.entities.MediaEntity
+import com.fieldtag.ui.theme.Dimens
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +65,7 @@ fun InstrumentDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val instrument = uiState.instrument
+    val haptic = LocalHapticFeedback.current
 
     Scaffold(
         topBar = {
@@ -74,7 +79,10 @@ fun InstrumentDetailScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { 
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onBack() 
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onPrimary)
                     }
                 },
@@ -89,12 +97,58 @@ fun InstrumentDetailScreen(
                 ),
             )
         },
+        bottomBar = {
+            if (instrument != null) {
+                BottomAppBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentPadding = PaddingValues(horizontal = Dimens.PaddingMedium, vertical = Dimens.PaddingSmall)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.PaddingMedium),
+                    ) {
+                        Button(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.markComplete()
+                            },
+                            modifier = Modifier.weight(1f).height(Dimens.MinTouchTarget),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            enabled = instrument.fieldStatus != FieldStatus.COMPLETE,
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null)
+                            Spacer(modifier = Modifier.width(Dimens.PaddingSmall))
+                            Text("Mark Complete")
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.markCannotLocate()
+                            },
+                            modifier = Modifier.weight(1f).height(Dimens.MinTouchTarget),
+                            colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFFFEBEE)),
+                            enabled = instrument.fieldStatus != FieldStatus.CANNOT_LOCATE,
+                            elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 2.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = null, tint = Color.Red)
+                            Spacer(modifier = Modifier.width(Dimens.PaddingSmall))
+                            Text("Cannot Locate", color = Color.Red)
+                        }
+                    }
+                }
+            }
+        },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { instrument?.let { onOpenCamera(it.id) } },
+                onClick = { 
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    instrument?.let { onOpenCamera(it.id) } 
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(Dimens.FabSize)
             ) {
-                Icon(Icons.Default.Camera, contentDescription = "Take Photo", tint = Color.White)
+                Icon(Icons.Default.Camera, contentDescription = "Take Photo", tint = Color.White, modifier = Modifier.size(32.dp))
             }
         },
     ) { paddingValues ->
@@ -109,38 +163,9 @@ fun InstrumentDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = Dimens.PaddingMedium),
         ) {
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Status actions - always visible and prominent (min 56dp per spec)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = viewModel::markComplete,
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                    enabled = instrument.fieldStatus != FieldStatus.COMPLETE,
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = null)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Mark Complete")
-                }
-                FilledTonalButton(
-                    onClick = viewModel::markCannotLocate,
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFFFEBEE)),
-                    enabled = instrument.fieldStatus != FieldStatus.CANNOT_LOCATE,
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = null, tint = Color.Red)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Cannot Locate", color = Color.Red)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(Dimens.PaddingMedium))
 
             // Notes
             var notes by remember(instrument.notes) { mutableStateOf(instrument.notes ?: "") }
@@ -152,7 +177,7 @@ fun InstrumentDetailScreen(
                 maxLines = 4,
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(Dimens.PaddingLarge))
 
             // Media grid
             Text(
@@ -160,7 +185,7 @@ fun InstrumentDetailScreen(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Dimens.PaddingMedium))
 
             if (uiState.mediaList.isEmpty()) {
                 Text(
@@ -170,9 +195,9 @@ fun InstrumentDetailScreen(
                 )
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    columns = GridCells.Adaptive(minSize = 120.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.PaddingSmall),
+                    verticalArrangement = Arrangement.spacedBy(Dimens.PaddingSmall),
                 ) {
                     items(uiState.mediaList, key = { it.id }) { media ->
                         MediaThumbnail(media = media)
@@ -189,6 +214,6 @@ fun MediaThumbnail(media: MediaEntity) {
         model = media.thumbnailPath,
         contentDescription = media.role.name,
         contentScale = ContentScale.Crop,
-        modifier = Modifier.size(110.dp),
+        modifier = Modifier.height(140.dp).fillMaxWidth(),
     )
 }

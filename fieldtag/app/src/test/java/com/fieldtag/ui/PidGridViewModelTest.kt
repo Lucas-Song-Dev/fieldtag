@@ -120,7 +120,7 @@ class PidGridViewModelTest {
 
     @Test fun onRegionSelected_no_tags_found_emits_NotFound() = runTest {
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns emptyList()
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(emptyList(), emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns emptyList()
 
         val vm = buildViewModel()
@@ -130,7 +130,7 @@ class PidGridViewModelTest {
         vm.onRegionSelected(0.1f, 0.1f, 0.2f, 0.2f)
         advanceUntilIdle()
 
-        assertTrue(vm.uiState.value.selectionResult is TagSelectionResult.NotFound)
+        assertTrue(vm.uiState.value.selectionResult is TagSelectionResult.NotFoundWithSuggestions)
     }
 
     @Test fun onRegionSelected_no_rawTextJson_does_nothing() = runTest {
@@ -151,7 +151,7 @@ class PidGridViewModelTest {
     @Test fun onRegionSelected_multiple_tags_emits_MultipleFound() = runTest {
         val tags = listOf(makeTag("FIC-5185"), makeTag("LIT-1025"))
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns tags
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(tags, emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns emptyList()
 
         val vm = buildViewModel()
@@ -172,7 +172,7 @@ class PidGridViewModelTest {
     @Test fun onRegionSelected_three_tags_still_emits_MultipleFound() = runTest {
         val tags = listOf(makeTag("FIC-5185"), makeTag("LIT-1025"), makeTag("PIC-5224"))
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns tags
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(tags, emptyList())
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -188,7 +188,7 @@ class PidGridViewModelTest {
     @Test fun onRegionSelected_single_new_tag_emits_SingleFound_with_null_existing() = runTest {
         val tag = makeTag("FIC-5185")
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns listOf(tag)
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(listOf(tag), emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns emptyList() // none in DB
 
         val vm = buildViewModel()
@@ -210,7 +210,7 @@ class PidGridViewModelTest {
         val tag = makeTag("FIC-5185")
         val existing = makeInstrument("FIC-5185")
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns listOf(tag)
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(listOf(tag), emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns listOf(existing)
 
         val vm = buildViewModel()
@@ -231,7 +231,7 @@ class PidGridViewModelTest {
         val tag = makeTag("fic-5185")
         val existing = makeInstrument("FIC-5185")
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns listOf(tag)
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(listOf(tag), emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns listOf(existing)
 
         val vm = buildViewModel()
@@ -249,7 +249,7 @@ class PidGridViewModelTest {
     @Test fun confirmNewTag_inserts_instrument_and_emits_navigation_event() = runTest {
         val tag = makeTag("FIC-5185")
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns listOf(tag)
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(listOf(tag), emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns emptyList()
 
         val vm = buildViewModel()
@@ -277,7 +277,7 @@ class PidGridViewModelTest {
     @Test fun confirmNewTag_uses_tag_coordinates_for_new_instrument() = runTest {
         val tag = makeTag("FIC-5185").copy(x = 0.33f, y = 0.44f)
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns listOf(tag)
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(listOf(tag), emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns emptyList()
 
         val vm = buildViewModel()
@@ -322,7 +322,7 @@ class PidGridViewModelTest {
     @Test fun clearResult_resets_selection_to_Idle() = runTest {
         val tags = listOf(makeTag("FIC-5185"), makeTag("LIT-1025"))
         coEvery { pidRepository.getById(DOC_ID) } returns makeDoc()
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns tags
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(tags, emptyList())
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -371,14 +371,14 @@ class PidGridViewModelTest {
     @Test fun onRegionSelected_forwards_current_page_index_to_parseRegion() = runTest {
         val doc = makeDoc()
         coEvery { pidRepository.getById(DOC_ID) } returns doc
-        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns emptyList()
+        coEvery { pidParser.parseRegion(any(), any(), any(), any(), any(), any()) } returns PidParser.RegionResult(emptyList(), emptyList())
         coEvery { instrumentRepository.getByProject(PROJECT_ID) } returns emptyList()
 
         val vm = buildViewModel()
         advanceUntilIdle()
 
         val pageSlot = slot<Int>()
-        coEvery { pidParser.parseRegion(any(), capture(pageSlot), any(), any(), any(), any()) } returns emptyList()
+        coEvery { pidParser.parseRegion(any(), capture(pageSlot), any(), any(), any(), any()) } returns PidParser.RegionResult(emptyList(), emptyList())
 
         vm.onRegionSelected(0.1f, 0.2f, 0.3f, 0.4f)
         advanceUntilIdle()
@@ -394,7 +394,7 @@ class PidGridViewModelTest {
         val x2Slot = slot<Float>(); val y2Slot = slot<Float>()
         coEvery {
             pidParser.parseRegion(any(), any(), capture(x1Slot), capture(y1Slot), capture(x2Slot), capture(y2Slot))
-        } returns emptyList()
+        } returns PidParser.RegionResult(emptyList(), emptyList())
 
         val vm = buildViewModel()
         advanceUntilIdle()

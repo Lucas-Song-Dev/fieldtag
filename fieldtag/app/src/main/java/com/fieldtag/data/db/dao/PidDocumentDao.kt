@@ -52,4 +52,7 @@ interface PidDocumentDao {
         rawTextJson: String?,
         warnings: String?,
     )
+
+    @Query("UPDATE pid_documents SET calibration_width = :w, calibration_height = :h, calibration_shape = :shape WHERE id = :id")
+    suspend fun updateCalibration(id: String, w: Float, h: Float, shape: String)
 }

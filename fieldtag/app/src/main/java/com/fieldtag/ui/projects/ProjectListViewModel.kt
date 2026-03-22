@@ -16,6 +16,8 @@ import javax.inject.Inject
 
 data class ProjectListUiState(
     val projects: List<ProjectEntity> = emptyList(),
+    val allProjects: List<ProjectEntity> = emptyList(),
+    val searchQuery: String = "",
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val showCreateDialog: Boolean = false,
@@ -35,8 +37,31 @@ class ProjectListViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             projects.collect { list ->
-                _uiState.update { it.copy(projects = list, isLoading = false) }
+                _uiState.update { state -> 
+                    state.copy(
+                        allProjects = list,
+                        projects = filterProjects(list, state.searchQuery),
+                        isLoading = false
+                    ) 
+                }
             }
+        }
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _uiState.update { state ->
+            state.copy(
+                searchQuery = query,
+                projects = filterProjects(state.allProjects, query)
+            )
+        }
+    }
+
+    private fun filterProjects(list: List<ProjectEntity>, query: String): List<ProjectEntity> {
+        if (query.isBlank()) return list
+        return list.filter { 
+            it.name.contains(query, ignoreCase = true) || 
+            (it.locationName?.contains(query, ignoreCase = true) == true) 
         }
     }
 

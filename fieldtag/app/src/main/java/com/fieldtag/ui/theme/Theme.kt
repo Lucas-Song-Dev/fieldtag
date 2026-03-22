@@ -10,15 +10,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val FieldTagLightColors = lightColorScheme(
-    primary = Color(0xFF1565C0),
+    primary = Color(0xFF2D3748), // Deep Slate
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFD3E4FF),
-    secondary = Color(0xFFF57C00),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFFFE0B2),
-    background = Color(0xFFFAFAFA),
+    primaryContainer = Color(0xFF4A5568),
+    secondary = Color(0xFFFFB300), // High-Viz Yellow
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFFFFE082),
+    background = Color(0xFFF7FAFC), // Off-white/slate
     surface = Color.White,
-    error = Color(0xFFB71C1C),
+    error = Color(0xFFE53E3E),
 )
 
 @Composable

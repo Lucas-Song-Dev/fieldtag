@@ -70,6 +70,12 @@ interface InstrumentDao {
     @Query("UPDATE instruments SET pid_x = :x, pid_y = :y WHERE id = :id")
     suspend fun updatePosition(id: String, x: Float, y: Float)
 
+    @Query("UPDATE instruments SET overlay_shape = :shape WHERE id = :id")
+    suspend fun updateShape(id: String, shape: String?)
+
+    @Query("UPDATE instruments SET tag_id = :tagId WHERE id = :id")
+    suspend fun updateTagId(id: String, tagId: String)
+
     @Query("SELECT COUNT(*) FROM instruments WHERE project_id = :projectId")
     fun observeTotalCount(projectId: String): Flow<Int>
 

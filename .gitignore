@@ -2,14 +2,18 @@
 *.iml
 .gradle/
 local.properties
+
+# IDE — keep shared settings where useful; omit noisy/user-specific
 .idea/workspace.xml
 .idea/tasks.xml
 .idea/gradle.xml
 .idea/assetWizardSettings.xml
-.idea/dictionaries
-.idea/libraries
-.idea/caches
-.idea/shelf
+.idea/dictionaries/
+.idea/libraries/
+.idea/caches/
+.idea/shelf/
+.idea/navEditor.xml
+.idea/deploymentTargetDropDown.xml
 
 # Android Studio generated files
 captures/
@@ -20,6 +24,9 @@ captures/
 **/build/
 **/out/
 
+# Kotlin build cache
+.kotlin/
+
 # Generated APKs / bundles
 *.apk
 *.ap_
@@ -27,18 +34,18 @@ captures/
 
 # Kotlin / Java compiled files
 *.class
+*.dex
 
 # Keystore / secrets — never commit these
 keystore.properties
 *.jks
 *.keystore
 
-# Gradle caches (keep wrapper scripts + jar)
-.gradle/
-!gradle/wrapper/gradle-wrapper.jar
-!gradle/wrapper/gradle-wrapper.properties
-!gradlew
-!gradlew.bat
+# Gradle wrapper must stay versioned (app lives under fieldtag/)
+!fieldtag/gradle/wrapper/gradle-wrapper.jar
+!fieldtag/gradle/wrapper/gradle-wrapper.properties
+!fieldtag/gradlew
+!fieldtag/gradlew.bat
 
 # IDE / OS artefacts
 .DS_Store
@@ -50,4 +57,14 @@ Thumbs.db
 .vscode/
 *.code-workspace
 
+# Local scratch / one-off messages
 commit_msg.txt
+
+# Local Gradle / build logs (not source)
+fieldtag/build_err.txt
+fieldtag/build_plain.txt
+fieldtag/compile.log
+*.log
+
+# Cursor local state (optional tooling)
+.cursor/

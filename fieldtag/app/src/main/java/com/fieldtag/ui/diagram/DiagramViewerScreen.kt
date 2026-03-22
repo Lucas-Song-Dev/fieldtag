@@ -3,69 +3,84 @@ package com.fieldtag.ui.diagram
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.NavigateBefore
-import androidx.compose.material.icons.automirrored.filled.NavigateNext
-import androidx.compose.material3.BottomSheetScaffold
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import com.fieldtag.data.db.entities.OverlayShape
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.fieldtag.data.db.entities.FieldStatus
 import com.fieldtag.data.db.entities.InstrumentEntity
 import com.fieldtag.data.db.entities.PidDocumentEntity
-import com.fieldtag.ui.instrument.statusColor
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.sqrt
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ── Status colours ────────────────────────────────────────────────────────────
+private fun statusColor(status: FieldStatus) = when (status) {
+    FieldStatus.COMPLETE      -> Color(0xFF4CAF50) // green
+    FieldStatus.IN_PROGRESS   -> Color(0xFFFFC107) // amber
+    FieldStatus.CANNOT_LOCATE -> Color(0xFFF44336) // red
+    FieldStatus.NOT_STARTED   -> Color(0xFF9E9E9E) // grey
+}
+
+// Fallback normalized size when calibration is absent
+private const val DEFAULT_CALIB = 0.025f
+
 @Composable
 fun DiagramViewerScreen(
     projectId: String,
     pidDocuments: List<PidDocumentEntity>,
     instruments: List<InstrumentEntity>,
     onInstrumentClick: (String) -> Unit,
+    /** Current page index (0-based), driven by ProjectDetailViewModel. */
+    currentPage: Int = 0,
+    /** Called once when the PDF is first opened and the total page count is known. */
+    onTotalPagesLoaded: (Int) -> Unit = {},
+    onPointTapped: (bitmap: Bitmap, normX: Float, normY: Float, pageIndex: Int) -> Unit = { _, _, _, _ -> },
+    /** Called when the user single-taps an existing instrument node on the diagram. */
+    onInstrumentNodeTapped: (instrumentId: String) -> Unit = {},
+    /** Normalized (0-1) calibrated bubble width from PidDocumentEntity. */
+    calibrationWidth: Float? = null,
+    /** Normalized (0-1) calibrated bubble height from PidDocumentEntity. */
+    calibrationHeight: Float? = null,
+    /** When true, draw the tag ID label above each outline rectangle. */
+    showTooltips: Boolean = false,
+    /** Default shape for all instrument overlays (from document calibration). */
+    calibrationShape: OverlayShape = OverlayShape.RECTANGLE,
+    centeredInstrumentId: String? = null,
+    onCenterConsumed: () -> Unit = {},
 ) {
     if (pidDocuments.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -75,233 +90,253 @@ fun DiagramViewerScreen(
     }
 
     val doc = pidDocuments.first()
-    val scope = rememberCoroutineScope()
-    val scaffoldState = rememberBottomSheetScaffoldState()
 
-    var selectedInstrument by remember { mutableStateOf<InstrumentEntity?>(null) }
-    var scale by remember { mutableFloatStateOf(1f) }
-    var panOffset by remember { mutableStateOf(Offset.Zero) }
-
-    // Page state
-    var currentPage by remember { mutableIntStateOf(0) }
-    var totalPages by remember { mutableIntStateOf(0) }
+    var scale      by remember { mutableFloatStateOf(1f) }
+    var panOffset  by remember { mutableStateOf(Offset.Zero) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    // Load the correct page whenever currentPage changes; dispose on exit
+    LaunchedEffect(currentPage) {
+        scale = 1f
+        panOffset = Offset.Zero
+    }
+
     LaunchedEffect(doc.filePath, currentPage) {
         withContext(Dispatchers.IO) {
             val file = File(doc.filePath)
             if (!file.exists()) return@withContext
             try {
-                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                val pfd      = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = PdfRenderer(pfd)
-                val pages = renderer.pageCount
-                val pageIdx = currentPage.coerceIn(0, pages - 1)
-                val page = renderer.openPage(pageIdx)
-                val newBitmap = Bitmap.createBitmap(
+                val pages    = renderer.pageCount
+                val pageIdx  = currentPage.coerceIn(0, pages - 1)
+                val page     = renderer.openPage(pageIdx)
+                val bmp      = Bitmap.createBitmap(
                     page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888
                 )
-                page.render(newBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 page.close()
                 renderer.close()
                 pfd.close()
-                // Swap on Main thread; recycle old bitmap
                 withContext(Dispatchers.Main) {
                     pageBitmap?.recycle()
-                    pageBitmap = newBitmap
-                    if (totalPages == 0) totalPages = pages
+                    pageBitmap = bmp
+                    onTotalPagesLoaded(pages)
                 }
             } catch (_: Exception) {}
         }
     }
 
-    // Clean up the last bitmap when the composable leaves composition
     DisposableEffect(Unit) { onDispose { pageBitmap?.recycle() } }
 
-    // Only show instruments that belong to the currently displayed page (1-based)
-    val pageInstruments = remember(instruments, currentPage) {
-        instruments.filter { it.pidPageNumber == currentPage + 1 }
+    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        scale     = (scale * zoomChange).coerceIn(0.3f, 12f)
+        panOffset += panChange
     }
 
-    LaunchedEffect(selectedInstrument) {
-        if (selectedInstrument != null) scaffoldState.bottomSheetState.expand()
-        else scaffoldState.bottomSheetState.partialExpand()
+    val imageRect  = remember { mutableStateOf(Rect.Zero) }
+    val canvasSize = remember { mutableStateOf(Size.Zero) }
+
+    // Instruments on this page that have been placed (have normalized coordinates)
+    val placedOnPage = instruments.filter {
+        it.pidPageNumber == currentPage + 1 && it.pidX != null && it.pidY != null
     }
 
-    // imageRect is set by Canvas DrawScope each frame so the tap handler uses the same rect
-    val imageRect = remember { mutableStateOf(Rect.Zero) }
-
-    BottomSheetScaffold(
-        scaffoldState = scaffoldState,
-        sheetPeekHeight = 0.dp,
-        sheetContent = {
-            selectedInstrument?.let { instrument ->
-                Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
-                    Text(
-                        instrument.tagId,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    instrument.instrumentType?.let {
-                        Text(it, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Status: ${instrument.fieldStatus.name.replace("_", " ")}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = { onInstrumentClick(instrument.id) },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                    ) { Text("Open") }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
+    LaunchedEffect(centeredInstrumentId, placedOnPage.size) {
+        if (centeredInstrumentId != null) {
+            val target = placedOnPage.firstOrNull { it.id == centeredInstrumentId }
+            val rect = imageRect.value
+            val cs = canvasSize.value
+            if (target != null && target.pidX != null && target.pidY != null && rect.width > 0f) {
+                scale = 3.5f
+                val cx = rect.left + target.pidX * rect.width
+                val cy = rect.top + target.pidY * rect.height
+                val pivotX = cs.width / 2f
+                val pivotY = cs.height / 2f
+                panOffset = Offset((pivotX - cx) * scale, (pivotY - cy) * scale)
+                onCenterConsumed()
             }
-        },
-    ) { paddingValues ->
-
-        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-            scale = (scale * zoomChange).coerceIn(0.3f, 12f)
-            panOffset += panChange
         }
+    }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-        ) {
-            val bitmap = pageBitmap
-            if (bitmap != null) {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .transformable(transformState)
-                        .pointerInput(pageInstruments) {
-                            detectTapGestures { tapScreenPt ->
-                                // Convert screen → canvas space (undo graphicsLayer transform)
-                                val cx = (tapScreenPt.x - panOffset.x) / scale
-                                val cy = (tapScreenPt.y - panOffset.y) / scale
-                                // Normalise within the drawn image rect
+    Box(modifier = Modifier.fillMaxSize()) {
+        val bitmap = pageBitmap
+        if (bitmap != null) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .transformable(transformState)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { tapPt ->
                                 val rect = imageRect.value
-                                if (rect.width == 0f || rect.height == 0f) return@detectTapGestures
-                                val normX = ((cx - rect.left) / rect.width).coerceIn(0f, 1f)
-                                val normY = ((cy - rect.top) / rect.height).coerceIn(0f, 1f)
-                                val hit = pageInstruments.firstOrNull { instr ->
-                                    val ix = instr.pidX ?: return@firstOrNull false
-                                    val iy = instr.pidY ?: return@firstOrNull false
-                                    kotlin.math.hypot(
-                                        (ix - normX).toDouble(),
-                                        (iy - normY).toDouble()
-                                    ) < 0.025
+                                val cs   = canvasSize.value
+                                if (rect.width <= 0f || cs.width <= 0f) return@detectTapGestures
+
+                                val pivotX = cs.width  / 2f
+                                val pivotY = cs.height / 2f
+                                val cx = (tapPt.x - pivotX - panOffset.x) / scale + pivotX
+                                val cy = (tapPt.y - pivotY - panOffset.y) / scale + pivotY
+                                val normX = ((cx - rect.left) / rect.width ).coerceIn(0f, 1f)
+                                val normY = ((cy - rect.top ) / rect.height).coerceIn(0f, 1f)
+
+                                // Hit threshold: half the calibrated width/height in norm coords
+                                val threshX = (calibrationWidth  ?: DEFAULT_CALIB) / 2f
+                                val threshY = (calibrationHeight ?: DEFAULT_CALIB) / 2f
+
+                                val hit = placedOnPage.firstOrNull { instr ->
+                                    val dx = (instr.pidX ?: 0f) - normX
+                                    val dy = (instr.pidY ?: 0f) - normY
+                                    kotlin.math.abs(dx) <= threshX && kotlin.math.abs(dy) <= threshY
                                 }
-                                selectedInstrument = hit
-                                if (hit == null) scope.launch {
-                                    scaffoldState.bottomSheetState.partialExpand()
+                                if (hit != null) onInstrumentNodeTapped(hit.id)
+                            },
+                            onDoubleTap = { tapPt ->
+                                val rect = imageRect.value
+                                val cs   = canvasSize.value
+                                if (rect.width > 0f && rect.height > 0f && cs.width > 0f) {
+                                    val pivotX = cs.width  / 2f
+                                    val pivotY = cs.height / 2f
+                                    val cx = (tapPt.x - pivotX - panOffset.x) / scale + pivotX
+                                    val cy = (tapPt.y - pivotY - panOffset.y) / scale + pivotY
+                                    val normX = ((cx - rect.left) / rect.width ).coerceIn(0f, 1f)
+                                    val normY = ((cy - rect.top ) / rect.height).coerceIn(0f, 1f)
+                                    Log.d("CALIB", "DOUBLE-TAP page=${currentPage + 1}" +
+                                        " norm=(${"%.4f".format(normX)}, ${"%.4f".format(normY)})")
+                                    onPointTapped(bitmap, normX, normY, currentPage)
+                                } else {
+                                    Log.w("CALIB", "DOUBLE-TAP ignored — imageRect/canvasSize not ready")
                                 }
+                            },
+                        )
+                    }
+                    .graphicsLayer(
+                        scaleX       = scale,
+                        scaleY       = scale,
+                        translationX = panOffset.x,
+                        translationY = panOffset.y,
+                    ),
+            ) {
+                val bmpW     = bitmap.width.toFloat()
+                val bmpH     = bitmap.height.toFloat()
+                val fitScale = minOf(size.width / bmpW, size.height / bmpH)
+                val drawW    = bmpW * fitScale
+                val drawH    = bmpH * fitScale
+                val imgLeft  = (size.width  - drawW) / 2f
+                val imgTop   = (size.height - drawH) / 2f
+
+                canvasSize.value = size
+                imageRect.value  = Rect(imgLeft, imgTop, imgLeft + drawW, imgTop + drawH)
+
+                // ── PDF page ─────────────────────────────────────────────────
+                drawImage(
+                    image     = bitmap.asImageBitmap(),
+                    dstOffset = IntOffset(imgLeft.toInt(), imgTop.toInt()),
+                    dstSize   = IntSize(drawW.toInt(), drawH.toInt()),
+                )
+
+                // ── Instrument outline overlays ───────────────────────────────
+                // Stroke stays visually ~2dp regardless of zoom level
+                val strokeWidth = 2f / scale
+
+                // Text paint reused for all tooltips
+                val textPaint = if (showTooltips) android.graphics.Paint().apply {
+                    color       = android.graphics.Color.WHITE
+                    textSize    = (11f * density) / scale   // ~11sp, constant screen size
+                    typeface    = android.graphics.Typeface.DEFAULT_BOLD
+                    isAntiAlias = true
+                    textAlign   = android.graphics.Paint.Align.CENTER
+                } else null
+
+                for (instr in placedOnPage) {
+                    val nx = instr.pidX ?: continue
+                    val ny = instr.pidY ?: continue
+
+                    val cx = imgLeft + nx * drawW
+                    val cy = imgTop  + ny * drawH
+                    // Unscaled height/width to remain absolute size on screen
+                    val hw = (((calibrationWidth  ?: DEFAULT_CALIB) * drawW) / 2f) / scale
+                    val hh = (((calibrationHeight ?: DEFAULT_CALIB) * drawH) / 2f) / scale
+
+                    val color = statusColor(instr.fieldStatus)
+                    val shape = instr.overlayShape ?: calibrationShape
+
+                    // Colored outline — shape determined by per-instrument override or doc default
+                    when (shape) {
+                        OverlayShape.RECTANGLE -> drawRect(
+                            color   = color,
+                            topLeft = Offset(cx - hw, cy - hh),
+                            size    = Size(hw * 2f, hh * 2f),
+                            style   = Stroke(width = strokeWidth),
+                        )
+                        OverlayShape.DIAMOND -> {
+                            val diamondPath = Path().apply {
+                                moveTo(cx,      cy - hh)
+                                lineTo(cx + hw, cy)
+                                lineTo(cx,      cy + hh)
+                                lineTo(cx - hw, cy)
+                                close()
                             }
-                        }
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = panOffset.x,
-                            translationY = panOffset.y,
-                        ),
-                ) {
-                    val bmpW = bitmap.width.toFloat()
-                    val bmpH = bitmap.height.toFloat()
-
-                    // Fit the bitmap to the canvas (letterbox / pillarbox), keep aspect ratio
-                    val fitScale = minOf(size.width / bmpW, size.height / bmpH)
-                    val drawW = bmpW * fitScale
-                    val drawH = bmpH * fitScale
-                    val imgLeft = (size.width - drawW) / 2f
-                    val imgTop = (size.height - drawH) / 2f
-
-                    // Publish the drawn rect for the tap handler (same-frame accuracy is fine)
-                    imageRect.value = Rect(imgLeft, imgTop, imgLeft + drawW, imgTop + drawH)
-
-                    // Draw the PDF page fitted to canvas
-                    drawImage(
-                        image = bitmap.asImageBitmap(),
-                        dstOffset = IntOffset(imgLeft.toInt(), imgTop.toInt()),
-                        dstSize = IntSize(drawW.toInt(), drawH.toInt()),
-                    )
-
-                    // Draw instrument dots at their tag text positions
-                    pageInstruments.forEach { instr ->
-                        val nx = instr.pidX ?: return@forEach
-                        val ny = instr.pidY ?: return@forEach
-                        // Map normalised [0,1] coords to canvas pixel position within the drawn image
-                        val dotCx = imgLeft + nx * drawW
-                        val dotCy = imgTop + ny * drawH
-                        val dotColor = statusColor(instr.fieldStatus)
-                        drawCircle(dotColor, radius = 14f, center = Offset(dotCx, dotCy))
-                        // Highlight ring when selected
-                        if (instr == selectedInstrument) {
-                            drawCircle(
-                                Color.White,
-                                radius = 18f,
-                                center = Offset(dotCx, dotCy),
-                                style = Stroke(width = 3f),
+                            drawPath(
+                                path  = diamondPath,
+                                color = color,
+                                style = Stroke(width = strokeWidth),
                             )
                         }
                     }
-                }
-            } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Loading diagram…", color = MaterialTheme.colorScheme.outline)
+
+                    // Tooltip: tag ID in a small pill drawn above the rectangle
+                    if (showTooltips && textPaint != null) {
+                        drawIntoCanvas { canvas ->
+                            val label    = instr.tagId
+                            val textW    = textPaint.measureText(label)
+                            val padding  = 4f * density / scale
+                            val pillW    = textW + padding * 2f
+                            val pillH    = textPaint.textSize + padding * 2f
+                            val pillLeft = cx - pillW / 2f
+                            val pillTop  = cy - hh - pillH - (2f * density / scale)
+                            val pillRect = android.graphics.RectF(
+                                pillLeft, pillTop,
+                                pillLeft + pillW, pillTop + pillH,
+                            )
+                            val cornerR  = pillH / 3f
+
+                            // Background pill
+                            val bgPaint = android.graphics.Paint().apply {
+                                this.color = android.graphics.Color.argb(
+                                    210,
+                                    ((color.red   * 255).toInt()),
+                                    ((color.green * 255).toInt()),
+                                    ((color.blue  * 255).toInt()),
+                                )
+                                isAntiAlias = true
+                            }
+                            canvas.nativeCanvas.drawRoundRect(pillRect, cornerR, cornerR, bgPaint)
+
+                            // Tag text
+                            val textY = pillTop + pillH / 2f + textPaint.textSize * 0.35f
+                            canvas.nativeCanvas.drawText(label, cx, textY, textPaint)
+                        }
+                    }
                 }
             }
 
-            // Page navigation bar — shown only when the document has multiple pages
-            if (totalPages > 1) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 12.dp)
-                        .background(
-                            color = Color.Black.copy(alpha = 0.60f),
-                            shape = RoundedCornerShape(8.dp),
-                        )
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(
-                        onClick = {
-                            currentPage--
-                            scale = 1f
-                            panOffset = Offset.Zero
-                        },
-                        enabled = currentPage > 0,
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.NavigateBefore,
-                            contentDescription = "Previous page",
-                            tint = Color.White,
-                        )
-                    }
-                    Text(
-                        text = "${currentPage + 1} / $totalPages",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 8.dp),
+            // Hint badge
+            Text(
+                text     = "Double-tap a tag label to identify it",
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.45f),
+                        androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
                     )
-                    IconButton(
-                        onClick = {
-                            currentPage++
-                            scale = 1f
-                            panOffset = Offset.Zero
-                        },
-                        enabled = currentPage < totalPages - 1,
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.NavigateNext,
-                            contentDescription = "Next page",
-                            tint = Color.White,
-                        )
-                    }
-                }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Loading diagram…", color = MaterialTheme.colorScheme.outline)
             }
         }
     }

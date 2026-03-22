@@ -1,5 +1,6 @@
 package com.fieldtag.domain.parser
 
+import android.util.Log
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
@@ -56,14 +57,47 @@ class PidParser {
             }
 
             val page = document.getPage(pageIndex)
-            val pageWidth = page.mediaBox.width
-            val pageHeight = page.mediaBox.height
+            val mediaBox = page.mediaBox
+            val cropBox = page.cropBox ?: mediaBox
+            val rotation = page.rotation
+            // Effective visual dimensions that PdfRenderer uses (swap if rotated 90/270)
+            val effectiveWidth  = if (rotation == 90 || rotation == 270) cropBox.height else cropBox.width
+            val effectiveHeight = if (rotation == 90 || rotation == 270) cropBox.width  else cropBox.height
+            val originX = if (rotation == 90 || rotation == 270) cropBox.lowerLeftY else cropBox.lowerLeftX
+            val originY = if (rotation == 90 || rotation == 270) cropBox.lowerLeftX else cropBox.lowerLeftY
+            val pageWidth  = effectiveWidth
+            val pageHeight = effectiveHeight
 
-            // Store raw text for re-parsing
+            Log.d("PidParser", "Page $pageNumber:" +
+                " mediaBox=${mediaBox.width}x${mediaBox.height}" +
+                " cropBox=${cropBox.width}x${cropBox.height}" +
+                " lowerLeft=(${cropBox.lowerLeftX},${cropBox.lowerLeftY})" +
+                " rotation=$rotation" +
+                " effective=${effectiveWidth}x${effectiveHeight}" +
+                " origin=($originX,$originY)"
+            )
+
+            // Log sample runs for coordinate debugging
+            if (pageRuns.isNotEmpty()) {
+                val xs = pageRuns.map { it.x }
+                val ys = pageRuns.map { it.y }
+                Log.d("PidParser", "  runs=${pageRuns.size}  xRange=[${xs.min()},${xs.max()}]  yRange=[${ys.min()},${ys.max()}]")
+                pageRuns.filter { IsaTagDetector.detectInText(it.text, pageNumber).isNotEmpty() }
+                    .take(3)
+                    .forEach { run ->
+                        val nx = if (pageWidth  > 0f) ((run.x - originX) / pageWidth ).coerceIn(0f, 1f) else 0f
+                        val ny = if (pageHeight > 0f) (1f - (run.y - originY) / pageHeight).coerceIn(0f, 1f) else 0f
+                        Log.d("PidParser", "  TAG '${run.text}' raw=(${run.x},${run.y}) norm=($nx,$ny)")
+                    }
+            }
+
+            // Store raw text + effective page geometry for re-parsing
             val pageJson = JSONObject().apply {
                 put("page", pageNumber)
                 put("width", pageWidth)
                 put("height", pageHeight)
+                put("originX", originX)
+                put("originY", originY)
                 val runsArray = JSONArray()
                 pageRuns.forEach { run ->
                     runsArray.put(JSONObject().apply {
@@ -84,6 +118,8 @@ class PidParser {
                     y = run.y,
                     pageWidth = pageWidth,
                     pageHeight = pageHeight,
+                    originX = originX,
+                    originY = originY,
                 )
                 allTextRuns.addAll(
                     detectedTags.map { tag ->
@@ -97,6 +133,19 @@ class PidParser {
         val deduplicated = deduplicateTags(allTags)
         val sorted = deduplicated.sortedWith(compareBy({ it.page }, { it.y ?: Float.MAX_VALUE }))
 
+        // ── Calibration log ───────────────────────────────────────────────────
+        // Log all found tags grouped by page so we know which page/position to
+        // navigate to for calibration tapping.
+        Log.d("CALIB", "=== ALL PARSED TAGS (${sorted.size} total) ===")
+        sorted.groupBy { it.page }.forEach { (page, tags) ->
+            tags.forEach { t ->
+                Log.d("CALIB", "  p${page} ${t.tagId}" +
+                    " normX=${"%.4f".format(t.x ?: -1f)}" +
+                    " normY=${"%.4f".format(t.y ?: -1f)}")
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         return ParseResult(
             tags = sorted,
             pageCount = pageCount,
@@ -104,6 +153,18 @@ class PidParser {
             warnings = warnings,
         )
     }
+
+    /**
+     * Result of a [parseRegion] call.
+     *
+     * @param tags        Detected ISA tags (may be empty).
+     * @param suggestions Nearby raw text strings, useful when [tags] is empty so the caller
+     *                    can surface them to the user for manual tag-ID entry.
+     */
+    data class RegionResult(
+        val tags: List<ParsedTag>,
+        val suggestions: List<String>,
+    )
 
     /**
      * Parses a rectangular region of a specific page using the pre-extracted [rawTextJson].
@@ -118,7 +179,7 @@ class PidParser {
      * @param y1f          Top boundary (screen-space: 0 = top of page).
      * @param x2f          Right boundary, normalised to [0, 1].
      * @param y2f          Bottom boundary, normalised to [0, 1].
-     * @return             Deduplicated list of tags whose bounding box centre falls inside the selection.
+     * @return             [RegionResult] with detected tags and (when empty) nearby text suggestions.
      */
     fun parseRegion(
         rawTextJson: String,
@@ -127,11 +188,18 @@ class PidParser {
         y1f: Float,
         x2f: Float,
         y2f: Float,
-    ): List<ParsedTag> {
+    ): RegionResult {
         val minX = minOf(x1f, x2f)
         val maxX = maxOf(x1f, x2f)
         val minY = minOf(y1f, y2f)
         val maxY = maxOf(y1f, y2f)
+        val centerX = (minX + maxX) / 2f
+        val centerY = (minY + maxY) / 2f
+        Log.d("CALIB", "parseRegion page=${pageIndex + 1}" +
+            " tapCenter=(${"%.4f".format(centerX)}, ${"%.4f".format(centerY)})" +
+            " box=[(${"%.4f".format(minX)}, ${"%.4f".format(minY)})" +
+            " → (${"%.4f".format(maxX)}, ${"%.4f".format(maxY)})]"
+        )
         val targetPage = pageIndex + 1 // rawTextJson uses 1-based page numbers
 
         val pages = JSONArray(rawTextJson)
@@ -139,35 +207,72 @@ class PidParser {
             val pageObj = pages.getJSONObject(i)
             if (pageObj.getInt("page") != targetPage) continue
 
-            val pageWidth = pageObj.getDouble("width").toFloat()
+            val pageWidth  = pageObj.getDouble("width").toFloat()
             val pageHeight = pageObj.getDouble("height").toFloat()
+            val originX    = pageObj.optDouble("originX", 0.0).toFloat()
+            val originY    = pageObj.optDouble("originY", 0.0).toFloat()
             val runs = pageObj.getJSONArray("runs")
             val found = mutableListOf<ParsedTag>()
 
-            for (j in 0 until runs.length()) {
+            data class RunDist(val text: String, val nx: Float, val ny: Float, val dist: Float)
+
+            // Pre-compute normalized positions for all runs on this page
+            val allRunDists = (0 until runs.length()).map { j ->
                 val run = runs.getJSONObject(j)
                 val rawX = run.getDouble("x").toFloat()
                 val rawY = run.getDouble("y").toFloat()
-                // Apply the same normalisation used in IsaTagDetector.detectWithPosition
-                val normX = if (pageWidth > 0f) (rawX / pageWidth).coerceIn(0f, 1f) else 0f
-                val normY = if (pageHeight > 0f) (1f - rawY / pageHeight).coerceIn(0f, 1f) else 0f
+                val nx = if (pageWidth  > 0f) ((rawX - originX) / pageWidth ).coerceIn(0f, 1f) else 0f
+                val ny = if (pageHeight > 0f) (1f - (rawY - originY) / pageHeight).coerceIn(0f, 1f) else 0f
+                val d = kotlin.math.hypot((nx - centerX).toDouble(), (ny - centerY).toDouble()).toFloat()
+                RunDist(run.getString("text"), nx, ny, d)
+            }
 
-                if (normX in minX..maxX && normY in minY..maxY) {
-                    found.addAll(
-                        IsaTagDetector.detectWithPosition(
-                            text = run.getString("text"),
-                            page = targetPage,
-                            x = rawX,
-                            y = rawY,
-                            pageWidth = pageWidth,
-                            pageHeight = pageHeight,
-                        )
+            for (rd in allRunDists) {
+                if (rd.nx in minX..maxX && rd.ny in minY..maxY) {
+                    val j = allRunDists.indexOf(rd)
+                    val run = runs.getJSONObject(j)
+                    val rawX = run.getDouble("x").toFloat()
+                    val rawY = run.getDouble("y").toFloat()
+                    val hits = IsaTagDetector.detectWithPosition(
+                        text = rd.text,
+                        page = targetPage,
+                        x = rawX,
+                        y = rawY,
+                        pageWidth  = pageWidth,
+                        pageHeight = pageHeight,
+                        originX    = originX,
+                        originY    = originY,
                     )
+                    found.addAll(hits)
                 }
             }
-            return deduplicateTags(found)
+
+            val tags = deduplicateTags(found)
+
+            // Always collect the 5 closest text runs for suggestions / debugging
+            val closest = allRunDists.sortedBy { it.dist }.take(5)
+
+            if (tags.isEmpty()) {
+                Log.d("CALIB", "  No tag hit. 5 closest text runs to tap:")
+                closest.forEach { r ->
+                    Log.d("CALIB", "    dist=${"%.4f".format(r.dist)}" +
+                        " at (${"%.4f".format(r.nx)}, ${"%.4f".format(r.ny)})" +
+                        " text='${r.text.take(40)}'")
+                }
+            } else {
+                tags.forEach { t ->
+                    Log.d("CALIB", "  HIT: ${t.tagId}" +
+                        " normX=${"%.4f".format(t.x ?: -1f)}" +
+                        " normY=${"%.4f".format(t.y ?: -1f)}")
+                }
+            }
+
+            return RegionResult(
+                tags = tags,
+                suggestions = closest.map { it.text }.filter { it.isNotBlank() },
+            )
         }
-        return emptyList()
+        return RegionResult(tags = emptyList(), suggestions = emptyList())
     }
 
     /**

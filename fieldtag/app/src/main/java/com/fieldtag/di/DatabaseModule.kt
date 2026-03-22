@@ -28,6 +28,7 @@ object DatabaseModule {
             FieldTagDatabase.DATABASE_NAME,
         )
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+            .addMigrations(FieldTagDatabase.MIGRATION_1_2, FieldTagDatabase.MIGRATION_2_3)
             .build()
     }
 

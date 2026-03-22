@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.fieldtag.data.db.entities.OverlayShape
 
 enum class ParseStatus { PENDING, PROCESSING, COMPLETE, FAILED, NEEDS_REVIEW }
 
@@ -32,4 +33,10 @@ data class PidDocumentEntity(
     @ColumnInfo(name = "raw_text_json") val rawTextJson: String? = null,
     @ColumnInfo(name = "parse_warnings") val parseWarnings: String? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    /** Normalized (0-1) instrument bubble width stored during calibration. Null until calibrated. */
+    @ColumnInfo(name = "calibration_width")  val calibrationWidth: Float?  = null,
+    /** Normalized (0-1) instrument bubble height stored during calibration. Null until calibrated. */
+    @ColumnInfo(name = "calibration_height") val calibrationHeight: Float? = null,
+    /** Shape used for all instrument overlays on this document (default RECTANGLE). */
+    @ColumnInfo(name = "calibration_shape")  val calibrationShape: OverlayShape = OverlayShape.RECTANGLE,
 )

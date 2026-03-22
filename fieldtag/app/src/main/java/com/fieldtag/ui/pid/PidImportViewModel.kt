@@ -70,8 +70,8 @@ class PidImportViewModel @Inject constructor(
                 val doc = pidRepository.importPdf(projectId, uri, fileName)
                 _uiState.update { it.copy(pidDocument = doc, isImporting = false, isParsing = true) }
 
-                // Extract text layer only — no instruments are auto-created.
-                // The user will manually identify tags on the grid view.
+                // Extract text layer only — no auto instrument creation.
+                // Instruments are created manually via calibrated double-tap OCR on the diagram.
                 pidRepository.extractTextOnly(doc.id)
 
                 val updatedDoc = pidRepository.getById(doc.id)
@@ -79,7 +79,9 @@ class PidImportViewModel @Inject constructor(
                     it.copy(
                         pidDocument = updatedDoc,
                         isParsing = false,
+                        // completedDocId signals nav to go to the calibration screen
                         completedDocId = updatedDoc?.id,
+                        parseWarnings = emptyList(),
                     )
                 }
             } catch (e: Exception) {

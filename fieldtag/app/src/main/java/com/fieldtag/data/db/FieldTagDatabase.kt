@@ -3,6 +3,8 @@ package com.fieldtag.data.db
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.fieldtag.data.db.dao.InstrumentDao
 import com.fieldtag.data.db.dao.MediaDao
 import com.fieldtag.data.db.dao.PidDocumentDao
@@ -19,7 +21,7 @@ import com.fieldtag.data.db.entities.ProjectEntity
         InstrumentEntity::class,
         MediaEntity::class,
     ],
-    version = 1,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -31,5 +33,19 @@ abstract class FieldTagDatabase : RoomDatabase() {
 
     companion object {
         const val DATABASE_NAME = "fieldtag.db"
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pid_documents ADD COLUMN calibration_width REAL")
+                db.execSQL("ALTER TABLE pid_documents ADD COLUMN calibration_height REAL")
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pid_documents ADD COLUMN calibration_shape TEXT NOT NULL DEFAULT 'RECTANGLE'")
+                db.execSQL("ALTER TABLE instruments ADD COLUMN overlay_shape TEXT")
+            }
+        }
     }
 }

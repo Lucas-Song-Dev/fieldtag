@@ -32,9 +32,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.fieldtag.ui.theme.Dimens
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PidImportScreen(
@@ -45,6 +49,7 @@ fun PidImportScreen(
     viewModel: PidImportViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val haptic = LocalHapticFeedback.current
 
     LaunchedEffect(uiState.completedDocId) {
         uiState.completedDocId?.let { onParseComplete(it) }
@@ -64,7 +69,10 @@ fun PidImportScreen(
             TopAppBar(
                 title = { Text("Import P&ID", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { 
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onBack() 
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onPrimary)
                     }
                 },
@@ -79,17 +87,17 @@ fun PidImportScreen(
             when {
                 uiState.isImporting || uiState.isParsing -> {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        modifier = Modifier.fillMaxSize().padding(Dimens.PaddingExtraLarge),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(64.dp))
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(Dimens.PaddingExtraLarge))
                         Text(
                             if (uiState.isImporting) "Importing PDF..." else "Extracting text layer...",
                             style = MaterialTheme.typography.titleMedium,
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(Dimens.PaddingMedium))
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         uiState.pidDocument?.fileName?.let {
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
@@ -98,37 +106,46 @@ fun PidImportScreen(
                 }
                 uiState.errorMessage != null -> {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        modifier = Modifier.fillMaxSize().padding(Dimens.PaddingExtraLarge),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Text("Import Failed", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
                         Text(uiState.errorMessage ?: "", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { pdfPickerLauncher.launch(arrayOf("application/pdf")) }) {
+                        Spacer(modifier = Modifier.height(Dimens.PaddingLarge))
+                        Button(
+                            onClick = { 
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                pdfPickerLauncher.launch(arrayOf("application/pdf")) 
+                            },
+                            modifier = Modifier.height(Dimens.MinTouchTarget)
+                        ) {
                             Text("Try Again")
                         }
                     }
                 }
                 else -> {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        modifier = Modifier.fillMaxSize().padding(Dimens.PaddingExtraLarge),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(Dimens.PaddingExtraLarge))
                         Text("Import P&ID PDF", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(Dimens.PaddingMedium))
                         Text(
                             "Select a P&ID PDF with a text layer. Tags will be automatically extracted and the instrument list will be ready before you go on site.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.outline,
                         )
-                        Spacer(modifier = Modifier.height(32.dp))
+                        Spacer(modifier = Modifier.height(Dimens.PaddingExtraLarge))
                         Button(
-                            onClick = { pdfPickerLauncher.launch(arrayOf("application/pdf")) },
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            onClick = { 
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                pdfPickerLauncher.launch(arrayOf("application/pdf")) 
+                            },
+                            modifier = Modifier.fillMaxWidth().height(Dimens.MinTouchTarget),
                         ) {
                             Text("Select PDF File")
                         }

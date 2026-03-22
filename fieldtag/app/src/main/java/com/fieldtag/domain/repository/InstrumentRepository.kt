@@ -3,6 +3,7 @@ package com.fieldtag.domain.repository
 import com.fieldtag.data.db.dao.InstrumentDao
 import com.fieldtag.data.db.entities.FieldStatus
 import com.fieldtag.data.db.entities.InstrumentEntity
+import com.fieldtag.data.db.entities.OverlayShape
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -60,6 +61,12 @@ class InstrumentRepository @Inject constructor(
 
     suspend fun updatePosition(id: String, x: Float, y: Float) =
         instrumentDao.updatePosition(id, x, y)
+
+    suspend fun updateShape(id: String, shape: OverlayShape?) =
+        instrumentDao.updateShape(id, shape?.name)
+
+    suspend fun updateTagId(id: String, tagId: String) =
+        instrumentDao.updateTagId(id, tagId)
 
     fun observeTotalCount(projectId: String): Flow<Int> = instrumentDao.observeTotalCount(projectId)
 

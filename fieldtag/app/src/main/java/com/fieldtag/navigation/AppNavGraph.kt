@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.fieldtag.ui.calibrate.DiagramCalibrateScreen
 import com.fieldtag.ui.camera.CameraScreen
 import com.fieldtag.ui.export.ExportScreen
 import com.fieldtag.ui.instrument.InstrumentDetailScreen
@@ -20,7 +21,9 @@ object Routes {
     const val PROJECT_LIST = "projects"
     const val PROJECT_DETAIL = "projects/{projectId}"
     const val PID_IMPORT = "projects/{projectId}/import"
-    /** Grid-based manual tag identification — replaces TagReview in the normal flow. */
+    /** One-time instrument-size calibration shown after every PDF import. */
+    const val CALIBRATE = "projects/{projectId}/calibrate/{pidDocumentId}"
+    /** Grid-based manual tag identification — kept but no longer in the main flow. */
     const val PID_GRID = "projects/{projectId}/grid/{pidDocumentId}"
     /** Kept for reference; no longer reachable via normal navigation. */
     const val TAG_REVIEW = "projects/{projectId}/review"
@@ -30,6 +33,7 @@ object Routes {
 
     fun projectDetail(projectId: String) = "projects/$projectId"
     fun pidImport(projectId: String) = "projects/$projectId/import"
+    fun calibrate(projectId: String, pidDocumentId: String) = "projects/$projectId/calibrate/$pidDocumentId"
     fun pidGrid(projectId: String, pidDocumentId: String) = "projects/$projectId/grid/$pidDocumentId"
     fun tagReview(projectId: String) = "projects/$projectId/review"
     fun instrumentDetail(instrumentId: String) = "instruments/$instrumentId"
@@ -60,6 +64,9 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
                 onImportPid = { navController.navigate(Routes.pidImport(projectId)) },
                 onInstrumentClick = { instrId -> navController.navigate(Routes.instrumentDetail(instrId)) },
                 onExport = { navController.navigate(Routes.export(projectId)) },
+                onRecalibrate = { pidDocumentId ->
+                    navController.navigate(Routes.calibrate(projectId, pidDocumentId))
+                },
             )
         }
 
@@ -72,8 +79,29 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
                 projectId = projectId,
                 onBack = { navController.popBackStack() },
                 onParseComplete = { pidDocumentId ->
-                    navController.navigate(Routes.pidGrid(projectId, pidDocumentId)) {
-                        popUpTo(Routes.pidImport(projectId)) { inclusive = true }
+                    // Text extracted; go to calibration screen so the user sets the instrument size.
+                    navController.navigate(Routes.calibrate(projectId, pidDocumentId)) {
+                        popUpTo(Routes.PROJECT_LIST)
+                    }
+                },
+            )
+        }
+
+        composable(
+            route = Routes.CALIBRATE,
+            arguments = listOf(
+                navArgument("projectId")    { type = NavType.StringType },
+                navArgument("pidDocumentId") { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val projectId    = backStackEntry.arguments?.getString("projectId")    ?: return@composable
+            val pidDocumentId = backStackEntry.arguments?.getString("pidDocumentId") ?: return@composable
+            DiagramCalibrateScreen(
+                pidDocumentId = pidDocumentId,
+                onBack = { navController.popBackStack() },
+                onCalibrated = {
+                    navController.navigate(Routes.projectDetail(projectId)) {
+                        popUpTo(Routes.PROJECT_LIST)
                     }
                 },
             )

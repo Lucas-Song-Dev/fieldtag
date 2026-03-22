@@ -8,6 +8,9 @@ import androidx.room.PrimaryKey
 
 enum class FieldStatus { NOT_STARTED, IN_PROGRESS, COMPLETE, CANNOT_LOCATE }
 
+/** Shape of the outline drawn over each instrument bubble on the P&ID diagram. */
+enum class OverlayShape { RECTANGLE, DIAMOND }
+
 @Entity(
     tableName = "instruments",
     foreignKeys = [
@@ -37,6 +40,8 @@ data class InstrumentEntity(
     @ColumnInfo(name = "instrument_type") val instrumentType: String? = null,
     @ColumnInfo(name = "pid_x") val pidX: Float? = null,
     @ColumnInfo(name = "pid_y") val pidY: Float? = null,
+    /** Per-instrument shape override; null = use the document's calibrationShape. */
+    @ColumnInfo(name = "overlay_shape") val overlayShape: OverlayShape? = null,
     @ColumnInfo(name = "field_status") val fieldStatus: FieldStatus = FieldStatus.NOT_STARTED,
     val notes: String? = null,
     @ColumnInfo(name = "sort_order") val sortOrder: Int = 0,

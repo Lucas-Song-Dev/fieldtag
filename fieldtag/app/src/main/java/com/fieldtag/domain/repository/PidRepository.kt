@@ -5,6 +5,7 @@ import android.net.Uri
 import com.fieldtag.data.db.dao.InstrumentDao
 import com.fieldtag.data.db.dao.PidDocumentDao
 import com.fieldtag.data.db.entities.InstrumentEntity
+import com.fieldtag.data.db.entities.OverlayShape
 import com.fieldtag.data.db.entities.ParseStatus
 import com.fieldtag.data.db.entities.PidDocumentEntity
 import com.fieldtag.domain.parser.IsaTagDetector
@@ -158,6 +159,13 @@ class PidRepository @Inject constructor(
                 throw e
             }
         }
+
+    suspend fun updateCalibration(
+        pidDocumentId: String,
+        width: Float,
+        height: Float,
+        shape: OverlayShape,
+    ) = pidDocumentDao.updateCalibration(pidDocumentId, width, height, shape.name)
 
     suspend fun reParse(pidDocumentId: String, projectId: String) =
         parsePidDocument(pidDocumentId, projectId)

@@ -12,14 +12,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -42,10 +47,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fieldtag.data.db.entities.ProjectEntity
+import com.fieldtag.ui.theme.Dimens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -58,6 +67,7 @@ fun ProjectListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val haptic = LocalHapticFeedback.current
 
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let {
@@ -78,30 +88,73 @@ fun ProjectListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = viewModel::showCreateDialog,
-                containerColor = MaterialTheme.colorScheme.primary,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.showCreateDialog()
+                },
+                containerColor = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+                modifier = Modifier.size(Dimens.FabSize),
             ) {
-                Icon(Icons.Default.Add, contentDescription = "New Project", tint = MaterialTheme.colorScheme.onPrimary)
+                Icon(
+                    Icons.Default.Add, 
+                    contentDescription = "New Project", 
+                    modifier = Modifier.size(32.dp)
+                )
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            when {
-                uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                uiState.projects.isEmpty() -> EmptyProjectsState(onCreateClick = viewModel::showCreateDialog)
-                else -> ProjectList(
-                    projects = uiState.projects,
-                    onProjectClick = onProjectClick,
-                    onArchive = viewModel::archiveProject,
+        Column(modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)
+        ) {
+            // Search Bar
+            if (uiState.allProjects.isNotEmpty() || uiState.searchQuery.isNotEmpty()) {
+                OutlinedTextField(
+                    value = uiState.searchQuery,
+                    onValueChange = viewModel::onSearchQueryChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Dimens.PaddingLarge, vertical = Dimens.PaddingMedium),
+                    placeholder = { Text("Search projects or locations...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                    singleLine = true,
                 )
+            }
+
+            Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                when {
+                    uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    uiState.allProjects.isEmpty() -> EmptyProjectsState(onCreateClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.showCreateDialog()
+                    })
+                    uiState.projects.isEmpty() -> {
+                        Text(
+                            "No projects match your search.",
+                            modifier = Modifier.align(Alignment.Center),
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                    else -> ProjectList(
+                        projects = uiState.projects,
+                        onProjectClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) 
+                            onProjectClick(it)
+                        },
+                    )
+                }
             }
         }
     }
 
     if (uiState.showCreateDialog) {
         CreateProjectDialog(
-            onConfirm = { name, notes -> viewModel.createProject(name, notes) },
+            onConfirm = { name, notes -> 
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                viewModel.createProject(name, notes) 
+            },
             onDismiss = viewModel::dismissCreateDialog,
         )
     }
@@ -111,11 +164,16 @@ fun ProjectListScreen(
 private fun ProjectList(
     projects: List<ProjectEntity>,
     onProjectClick: (String) -> Unit,
-    onArchive: (String) -> Unit,
 ) {
-    LazyColumn(
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    // Increased minSize for wider horizontal landscape cards
+    val minColWidth = 360.dp
+
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = minColWidth),
+        contentPadding = PaddingValues(Dimens.PaddingLarge),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.PaddingLarge),
+        verticalArrangement = Arrangement.spacedBy(Dimens.PaddingLarge),
+        modifier = Modifier.fillMaxSize()
     ) {
         items(projects, key = { it.id }) { project ->
             ProjectCard(project = project, onClick = { onProjectClick(project.id) })
@@ -129,14 +187,36 @@ private fun ProjectCard(project: ProjectEntity, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(project.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
+        Column(modifier = Modifier.padding(Dimens.PaddingExtraLarge)) {
+            Text(project.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            
+            Spacer(modifier = Modifier.height(Dimens.PaddingMedium))
+            
+            if (!project.locationName.isNullOrBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(Dimens.PaddingSmall))
+                    Text(project.locationName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(Dimens.PaddingSmall))
+            
             val dateStr = SimpleDateFormat("MMM d, yyyy", Locale.US).format(Date(project.createdAt))
-            Text("Created $dateStr", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-            project.locationName?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            Text("Created $dateStr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+
+            if (!project.notes.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(Dimens.PaddingMedium))
+                Text(
+                    text = project.notes, 
+                    style = MaterialTheme.typography.bodySmall, 
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -145,7 +225,9 @@ private fun ProjectCard(project: ProjectEntity, onClick: () -> Unit) {
 @Composable
 private fun EmptyProjectsState(onCreateClick: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(Dimens.PaddingExtraLarge),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -155,15 +237,21 @@ private fun EmptyProjectsState(onCreateClick: () -> Unit) {
             modifier = Modifier.size(64.dp),
             tint = MaterialTheme.colorScheme.outline,
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(Dimens.PaddingLarge))
         Text("No projects yet", style = MaterialTheme.typography.titleMedium)
         Text(
             "Tap + to create your first project and import a P&ID",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.outline,
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onCreateClick) { Text("Create Project") }
+        Spacer(modifier = Modifier.height(Dimens.PaddingExtraLarge))
+        Button(
+            onClick = onCreateClick, 
+            modifier = Modifier.height(Dimens.MinTouchTarget),
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
+        ) { 
+            Text("Create Project") 
+        }
     }
 }
 
@@ -176,7 +264,7 @@ private fun CreateProjectDialog(onConfirm: (String, String?) -> Unit, onDismiss:
         onDismissRequest = onDismiss,
         title = { Text("New Project") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.PaddingMedium)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -187,17 +275,30 @@ private fun CreateProjectDialog(onConfirm: (String, String?) -> Unit, onDismiss:
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
-                    label = { Text("Notes (optional)") },
+                    label = { Text("Location / Notes") },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 3,
                 )
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(name, notes.takeIf { it.isNotBlank() }) }, enabled = name.isNotBlank()) {
+            Button(
+                onClick = { onConfirm(name, notes.takeIf { it.isNotBlank() }) }, 
+                enabled = name.isNotBlank(),
+                modifier = Modifier.height(Dimens.MinTouchTarget),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
+            ) {
                 Text("Create")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { 
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.height(Dimens.MinTouchTarget)
+            ) { 
+                Text("Cancel") 
+            } 
+        },
+        modifier = Modifier.fillMaxWidth(Dimens.DialogWidthPercentage)
     )
 }

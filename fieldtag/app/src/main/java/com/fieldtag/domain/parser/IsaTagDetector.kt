@@ -101,10 +101,13 @@ object IsaTagDetector {
 
     /**
      * Detect ISA tags from a text run that includes position information.
-     * @param x raw x position in PDF points
-     * @param y raw y position in PDF points
-     * @param pageWidth PDF page width in points
-     * @param pageHeight PDF page height in points
+     *
+     * @param x          Raw x from PdfBox (xDirAdj), in PDF points.
+     * @param y          Raw y from PdfBox (yDirAdj), in PDF points — bottom-origin.
+     * @param pageWidth  Effective visual page width (post-rotation, post-cropBox).
+     * @param pageHeight Effective visual page height.
+     * @param originX    Lower-left x of the crop box in the direction that maps to screen-x.
+     * @param originY    Lower-left y of the crop box in the direction that maps to screen-y.
      */
     fun detectWithPosition(
         text: String,
@@ -113,17 +116,17 @@ object IsaTagDetector {
         y: Float,
         pageWidth: Float,
         pageHeight: Float,
+        originX: Float = 0f,
+        originY: Float = 0f,
     ): List<ParsedTag> {
         val tags = detectInText(text, page)
         return tags.map { tag ->
             tag.copy(
-                // Clamp to [0, 1]: text in headers/footers can have coordinates slightly
-                // outside the declared page bounds, which would produce values > 1 or < 0.
-                x = if (pageWidth > 0f) (x / pageWidth).coerceIn(0f, 1f) else null,
-                // PdfBox yDirAdj is measured from the BOTTOM of the page (PDF coord convention).
-                // Screen / bitmap coordinates have y=0 at the TOP, so we invert here so that
-                // stored y values map directly to bitmap pixel fractions in DiagramViewerScreen.
-                y = if (pageHeight > 0f) (1f - (y / pageHeight)).coerceIn(0f, 1f) else null,
+                // Subtract crop-box origin so coords are relative to the visible page area,
+                // then divide by effective dimension.  Clamp handles slight out-of-bounds text.
+                x = if (pageWidth  > 0f) ((x - originX) / pageWidth ).coerceIn(0f, 1f) else null,
+                // PdfBox y is bottom-origin; invert so y=0 is screen top.
+                y = if (pageHeight > 0f) (1f - (y - originY) / pageHeight).coerceIn(0f, 1f) else null,
             )
         }
     }
