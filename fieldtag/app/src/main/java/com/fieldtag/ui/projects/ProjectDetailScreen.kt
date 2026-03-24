@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.LabelOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
@@ -42,6 +43,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -56,6 +59,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,23 +73,29 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fieldtag.data.db.entities.OverlayShape
+import com.fieldtag.domain.auth.AuthSession
 import com.fieldtag.ui.diagram.DiagramViewerScreen
 import com.fieldtag.ui.instrument.InstrumentListScreen
 import com.fieldtag.ui.pid.TagSelectionResult
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectDetailScreen(
     projectId: String,
+    authSession: AuthSession,
     onBack: () -> Unit,
     onImportPid: () -> Unit,
     onInstrumentClick: (String) -> Unit,
     onExport: () -> Unit,
-    onRecalibrate: (pidDocumentId: String) -> Unit = {},
+    onRecalibrate: (pidDocumentId: String, pageNumber: Int) -> Unit = { _, _ -> },
+    onNavigateToSignIn: () -> Unit,
     viewModel: ProjectDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val project = uiState.project
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     // Navigate to an instrument when the diagram tap creates / finds one
     LaunchedEffect(Unit) {
@@ -495,6 +505,7 @@ fun ProjectDetailScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -513,7 +524,7 @@ fun ProjectDetailScreen(
                         )
                     } else {
                         Column {
-                            Text(project?.name ?: "Project", fontWeight = FontWeight.Bold)
+                            Text(project?.name ?: "Project", style = MaterialTheme.typography.titleLarge)
                             if (uiState.totalCount > 0) {
                                 Text(
                                     "${uiState.completeCount}/${uiState.totalCount} instruments complete",
@@ -569,7 +580,7 @@ fun ProjectDetailScreen(
                                     tint = MaterialTheme.colorScheme.onPrimary,
                                 )
                             }
-                            IconButton(onClick = { onRecalibrate(pidDocId) }) {
+                            IconButton(onClick = { onRecalibrate(pidDocId, uiState.diagramCurrentPage) }) {
                                 Icon(
                                     Icons.Default.Tune,
                                     contentDescription = "Recalibrate instrument size",
@@ -582,6 +593,24 @@ fun ProjectDetailScreen(
                         IconButton(onClick = onImportPid) {
                             Icon(Icons.Default.FileUpload, contentDescription = "Import P&ID", tint = MaterialTheme.colorScheme.onPrimary)
                         }
+                    }
+                    IconButton(
+                        onClick = {
+                            when (authSession) {
+                                is AuthSession.SignedIn -> scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        "Team sharing will be available in a future update.",
+                                    )
+                                }
+                                AuthSession.SignedOut -> onNavigateToSignIn()
+                            }
+                        },
+                    ) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = "Share with team",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
                     }
                     IconButton(onClick = onExport) {
                         Icon(Icons.Default.IosShare, contentDescription = "Export", tint = MaterialTheme.colorScheme.onPrimary)
@@ -660,12 +689,13 @@ fun ProjectDetailScreen(
                                 viewModel.onDiagramTapped(bitmap, normX, normY, pageIndex)
                             },
                             onInstrumentNodeTapped = { viewModel.onInstrumentNodeTapped(it) },
-                            calibrationWidth  = uiState.pidDocuments.firstOrNull()?.calibrationWidth,
+                            calibrationWidth = uiState.pidDocuments.firstOrNull()?.calibrationWidth,
                             calibrationHeight = uiState.pidDocuments.firstOrNull()?.calibrationHeight,
-                            showTooltips      = uiState.diagramShowTooltips,
-                            calibrationShape  = uiState.pidDocuments.firstOrNull()?.calibrationShape ?: OverlayShape.RECTANGLE,
+                            showTooltips = uiState.diagramShowTooltips,
+                            calibrationShape = uiState.pidDocuments.firstOrNull()?.calibrationShape ?: OverlayShape.RECTANGLE,
                             centeredInstrumentId = uiState.diagramCenteredInstrumentId,
-                            onCenterConsumed  = viewModel::clearDiagramCenteredInstrument,
+                            onCenterConsumed = viewModel::clearDiagramCenteredInstrument,
+                            pageCalibrations = uiState.pageCalibrations,
                         )
                     }
                 }

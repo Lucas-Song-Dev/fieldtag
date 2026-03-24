@@ -1,0 +1,219 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '17'
+  GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Dkotlin.incremental=false'
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # 1. Static analysis: lint + compile check
+  # ──────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run Android Lint
+        working-directory: fieldtag
+        run: ./gradlew :app:lintDebug --stacktrace
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: fieldtag/app/build/reports/lint-results-debug.html
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────
+  # 2. JVM unit tests  (parser, repository, ViewModel, auth …)
+  # ──────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests (JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run unit tests
+        working-directory: fieldtag
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            fieldtag/app/build/reports/tests/testDebugUnitTest/
+            fieldtag/app/build/test-results/testDebugUnitTest/
+          retention-days: 14
+
+      - name: Publish test summary
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: fieldtag/app/build/test-results/testDebugUnitTest/**/*.xml
+          check_name: Unit Test Results
+
+  # ──────────────────────────────────────────────────────────────────
+  # 3. Instrumented tests — Room DB migrations + integration tests
+  #    Runs on an Android emulator via reactivecircus/android-emulator-runner
+  # ──────────────────────────────────────────────────────────────────
+  instrumented-tests:
+    name: Instrumented Tests (Emulator)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Test each category independently so failures are easier to diagnose
+        include:
+          - shard: db
+            filter: "com.fieldtag.db"
+            name: "DB Migrations"
+          - shard: prefs
+            filter: "com.fieldtag.data.preferences"
+            name: "Preferences / DataStore"
+          - shard: parser
+            filter: "com.fieldtag.parser"
+            name: "Parser Integration"
+          - shard: workflow
+            filter: "com.fieldtag.workflow"
+            name: "Project Workflow"
+          - shard: e2e
+            filter: "com.fieldtag.e2e"
+            name: "E2E / UI"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: true
+
+      # AVD cache keeps the emulator image between runs (saves ~3 min per job)
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-api34-${{ runner.os }}
+
+      - name: Create AVD (if cache miss)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: false
+          script: echo "AVD created"
+
+      - name: Run instrumented tests — ${{ matrix.name }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          working-directory: fieldtag
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.package=${{ matrix.filter }} \
+              --stacktrace
+
+      - name: Upload instrumented test results — ${{ matrix.name }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-${{ matrix.shard }}-results
+          path: |
+            fieldtag/app/build/reports/androidTests/connected/
+            fieldtag/app/build/outputs/androidTest-results/
+          retention-days: 14
+
+      - name: Publish test summary — ${{ matrix.name }}
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: fieldtag/app/build/outputs/androidTest-results/**/*.xml
+          check_name: Instrumented [${{ matrix.name }}]
+
+  # ──────────────────────────────────────────────────────────────────
+  # 4. Build release APK — ensures the release variant always compiles
+  # ──────────────────────────────────────────────────────────────────
+  build-release:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: true
+
+      - name: Assemble release APK
+        working-directory: fieldtag
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fieldtag-release-apk
+          path: fieldtag/app/build/outputs/apk/release/*.apk
+          retention-days: 30

@@ -1,5 +1,6 @@
 package com.fieldtag.ui.projects
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -21,7 +23,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,6 +34,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -47,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fieldtag.data.db.entities.ProjectEntity
+import com.fieldtag.domain.auth.AuthSession
 import com.fieldtag.ui.theme.Dimens
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -62,12 +70,16 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectListScreen(
+    authSession: AuthSession,
     onProjectClick: (String) -> Unit,
+    onOpenSignIn: () -> Unit,
+    onSignOut: () -> Unit,
     viewModel: ProjectListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val haptic = LocalHapticFeedback.current
+    var accountMenuExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let {
@@ -79,11 +91,60 @@ fun ProjectListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("FieldTag", fontWeight = FontWeight.Bold) },
+                title = { Text("FieldTag", style = MaterialTheme.typography.titleLarge) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
+                actions = {
+                    Box {
+                        IconButton(
+                            onClick = { accountMenuExpanded = true },
+                            modifier = Modifier.size(Dimens.MinTouchTarget),
+                        ) {
+                            Icon(
+                                Icons.Outlined.AccountCircle,
+                                contentDescription = "Account",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = accountMenuExpanded,
+                            onDismissRequest = { accountMenuExpanded = false },
+                        ) {
+                            when (authSession) {
+                                is AuthSession.SignedIn -> {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                authSession.displayName?.let { "Signed in as $it" }
+                                                    ?: "Signed in",
+                                            )
+                                        },
+                                        onClick = {},
+                                        enabled = false,
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Sign out") },
+                                        onClick = {
+                                            accountMenuExpanded = false
+                                            onSignOut()
+                                        },
+                                    )
+                                }
+                                AuthSession.SignedOut -> {
+                                    DropdownMenuItem(
+                                        text = { Text("Sign in") },
+                                        onClick = {
+                                            accountMenuExpanded = false
+                                            onOpenSignIn()
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
             )
         },
         floatingActionButton = {
@@ -231,26 +292,38 @@ private fun EmptyProjectsState(onCreateClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        Box(
+            modifier = Modifier
+                .width(56.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.secondary),
+        )
+        Spacer(modifier = Modifier.height(Dimens.PaddingExtraLarge))
         Icon(
             Icons.Default.FolderOpen,
             contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.size(72.dp),
+            tint = MaterialTheme.colorScheme.primary,
         )
         Spacer(modifier = Modifier.height(Dimens.PaddingLarge))
-        Text("No projects yet", style = MaterialTheme.typography.titleMedium)
+        Text("Start your first project", style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(Dimens.PaddingMedium))
         Text(
-            "Tap + to create your first project and import a P&ID",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.outline,
+            "Create a project, import a P&ID, and capture instruments in the field — no account required.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(Dimens.PaddingExtraLarge))
         Button(
-            onClick = onCreateClick, 
+            onClick = onCreateClick,
             modifier = Modifier.height(Dimens.MinTouchTarget),
-            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
-        ) { 
-            Text("Create Project") 
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+            ),
+        ) {
+            Text("Create project")
         }
     }
 }

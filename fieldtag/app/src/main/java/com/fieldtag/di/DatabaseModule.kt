@@ -7,6 +7,7 @@ import com.fieldtag.data.db.FieldTagDatabase
 import com.fieldtag.data.db.dao.InstrumentDao
 import com.fieldtag.data.db.dao.MediaDao
 import com.fieldtag.data.db.dao.PidDocumentDao
+import com.fieldtag.data.db.dao.PidPageCalibrationDao
 import com.fieldtag.data.db.dao.ProjectDao
 import dagger.Module
 import dagger.Provides
@@ -28,7 +29,11 @@ object DatabaseModule {
             FieldTagDatabase.DATABASE_NAME,
         )
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(FieldTagDatabase.MIGRATION_1_2, FieldTagDatabase.MIGRATION_2_3)
+            .addMigrations(
+                FieldTagDatabase.MIGRATION_1_2,
+                FieldTagDatabase.MIGRATION_2_3,
+                FieldTagDatabase.MIGRATION_3_4,
+            )
             .build()
     }
 
@@ -36,4 +41,5 @@ object DatabaseModule {
     @Provides fun providePidDocumentDao(db: FieldTagDatabase): PidDocumentDao = db.pidDocumentDao()
     @Provides fun provideInstrumentDao(db: FieldTagDatabase): InstrumentDao = db.instrumentDao()
     @Provides fun provideMediaDao(db: FieldTagDatabase): MediaDao = db.mediaDao()
+    @Provides fun providePidPageCalibrationDao(db: FieldTagDatabase): PidPageCalibrationDao = db.pidPageCalibrationDao()
 }

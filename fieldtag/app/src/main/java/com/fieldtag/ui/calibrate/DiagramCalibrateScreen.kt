@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.NavigateBefore
+import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -83,7 +85,16 @@ fun DiagramCalibrateScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Calibrate Instrument Size", fontWeight = FontWeight.Bold) },
+                title = {
+                    if (uiState.totalPages > 0) {
+                        Text(
+                            "Calibrate · Page ${uiState.currentPage + 1} / ${uiState.totalPages}",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    } else {
+                        Text("Calibrate Instrument Size", style = MaterialTheme.typography.titleMedium)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -94,9 +105,32 @@ fun DiagramCalibrateScreen(
                     }
                 },
                 actions = {
+                    // Page navigation
+                    if (uiState.totalPages > 1) {
+                        IconButton(
+                            onClick = { viewModel.goToPage(uiState.currentPage - 1) },
+                            enabled = !uiState.isLoading && uiState.currentPage > 0,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.NavigateBefore,
+                                contentDescription = "Previous page",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.goToPage(uiState.currentPage + 1) },
+                            enabled = !uiState.isLoading && uiState.currentPage < uiState.totalPages - 1,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.NavigateNext,
+                                contentDescription = "Next page",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                    }
                     val shapeLabel = when (uiState.boxShape) {
                         OverlayShape.RECTANGLE -> "□ Rect"
-                        OverlayShape.DIAMOND   -> "◇ Diamond"
+                        OverlayShape.DIAMOND -> "◇ Diamond"
                     }
                     TextButton(onClick = { viewModel.cycleShape() }) {
                         Text(shapeLabel, color = MaterialTheme.colorScheme.onPrimary)
@@ -133,16 +167,19 @@ fun DiagramCalibrateScreen(
                 }
                 uiState.pageBitmap != null -> {
                     CalibrateCanvas(
-                        uiState   = uiState,
-                        modifier  = Modifier.weight(1f),
-                        onMove    = { dx, dy -> viewModel.moveBox(dx, dy) },
-                        onResize  = { corner, dx, dy -> viewModel.resizeBox(corner, dx, dy) },
+                        uiState = uiState,
+                        modifier = Modifier.weight(1f),
+                        onMove = { dx, dy -> viewModel.moveBox(dx, dy) },
+                        onResize = { corner, dx, dy -> viewModel.resizeBox(corner, dx, dy) },
                     )
                 }
             }
 
             Text(
-                text  = "Pinch to zoom · Drag empty area to pan · Drag box to move · Drag corner to resize",
+                text = if (uiState.totalPages > 1)
+                    "Use < > to navigate pages · Page 1 is the default for all pages · Drag box to move · Drag corner to resize"
+                else
+                    "Pinch to zoom · Drag empty area to pan · Drag box to move · Drag corner to resize",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),

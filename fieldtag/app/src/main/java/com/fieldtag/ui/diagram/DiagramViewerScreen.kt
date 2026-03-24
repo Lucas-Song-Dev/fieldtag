@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.fieldtag.data.db.entities.FieldStatus
 import com.fieldtag.data.db.entities.InstrumentEntity
 import com.fieldtag.data.db.entities.PidDocumentEntity
+import com.fieldtag.data.db.entities.PidPageCalibrationEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -71,14 +72,19 @@ fun DiagramViewerScreen(
     onPointTapped: (bitmap: Bitmap, normX: Float, normY: Float, pageIndex: Int) -> Unit = { _, _, _, _ -> },
     /** Called when the user single-taps an existing instrument node on the diagram. */
     onInstrumentNodeTapped: (instrumentId: String) -> Unit = {},
-    /** Normalized (0-1) calibrated bubble width from PidDocumentEntity. */
+    /** Document-level fallback calibrated bubble width from PidDocumentEntity (null = not yet calibrated). */
     calibrationWidth: Float? = null,
-    /** Normalized (0-1) calibrated bubble height from PidDocumentEntity. */
+    /** Document-level fallback calibrated bubble height from PidDocumentEntity (null = not yet calibrated). */
     calibrationHeight: Float? = null,
     /** When true, draw the tag ID label above each outline rectangle. */
     showTooltips: Boolean = false,
     /** Default shape for all instrument overlays (from document calibration). */
     calibrationShape: OverlayShape = OverlayShape.RECTANGLE,
+    /**
+     * Per-page calibration overrides keyed by 1-based page number.
+     * When a page has an entry, its values take precedence over the document-level calibration.
+     */
+    pageCalibrations: Map<Int, PidPageCalibrationEntity> = emptyMap(),
     centeredInstrumentId: String? = null,
     onCenterConsumed: () -> Unit = {},
 ) {
@@ -252,13 +258,20 @@ fun DiagramViewerScreen(
                     val ny = instr.pidY ?: continue
 
                     val cx = imgLeft + nx * drawW
-                    val cy = imgTop  + ny * drawH
-                    // Unscaled height/width to remain absolute size on screen
-                    val hw = (((calibrationWidth  ?: DEFAULT_CALIB) * drawW) / 2f) / scale
-                    val hh = (((calibrationHeight ?: DEFAULT_CALIB) * drawH) / 2f) / scale
+                    val cy = imgTop + ny * drawH
+
+                    // Resolve calibration: per-page → doc-level → default
+                    val pageCalib = pageCalibrations[instr.pidPageNumber]
+                    val effW = pageCalib?.calibrationWidth ?: calibrationWidth ?: DEFAULT_CALIB
+                    val effH = pageCalib?.calibrationHeight ?: calibrationHeight ?: DEFAULT_CALIB
+
+                    // Scale proportionally with the diagram (no /scale — tags grow as user zooms in)
+                    val hw = effW * drawW / 2f
+                    val hh = effH * drawH / 2f
 
                     val color = statusColor(instr.fieldStatus)
-                    val shape = instr.overlayShape ?: calibrationShape
+                    val effectiveShape = pageCalib?.calibrationShape ?: instr.overlayShape ?: calibrationShape
+                    val shape = effectiveShape
 
                     // Colored outline — shape determined by per-instrument override or doc default
                     when (shape) {

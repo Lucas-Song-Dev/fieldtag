@@ -4,10 +4,12 @@ import android.content.Context
 import android.net.Uri
 import com.fieldtag.data.db.dao.InstrumentDao
 import com.fieldtag.data.db.dao.PidDocumentDao
+import com.fieldtag.data.db.dao.PidPageCalibrationDao
 import com.fieldtag.data.db.entities.InstrumentEntity
 import com.fieldtag.data.db.entities.OverlayShape
 import com.fieldtag.data.db.entities.ParseStatus
 import com.fieldtag.data.db.entities.PidDocumentEntity
+import com.fieldtag.data.db.entities.PidPageCalibrationEntity
 import com.fieldtag.domain.parser.IsaTagDetector
 import com.fieldtag.domain.parser.PidParser
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -25,6 +27,7 @@ class PidRepository @Inject constructor(
     private val pidDocumentDao: PidDocumentDao,
     private val instrumentDao: InstrumentDao,
     private val pidParser: PidParser,
+    private val pageCalibrationDao: PidPageCalibrationDao,
     @ApplicationContext private val context: Context,
 ) {
     fun observeByProject(projectId: String): Flow<List<PidDocumentEntity>> =
@@ -166,6 +169,31 @@ class PidRepository @Inject constructor(
         height: Float,
         shape: OverlayShape,
     ) = pidDocumentDao.updateCalibration(pidDocumentId, width, height, shape.name)
+
+    /** Upsert a per-page calibration. Uses 1-based page numbers. */
+    suspend fun upsertPageCalibration(
+        pidDocumentId: String,
+        pageNumber: Int,
+        width: Float,
+        height: Float,
+        shape: OverlayShape,
+    ) = pageCalibrationDao.upsert(
+        PidPageCalibrationEntity(
+            pidDocumentId = pidDocumentId,
+            pageNumber = pageNumber,
+            calibrationWidth = width,
+            calibrationHeight = height,
+            calibrationShape = shape,
+        ),
+    )
+
+    /** Observe all per-page calibrations for a document as a map keyed by page number (1-based). */
+    fun observePageCalibrations(pidDocumentId: String) =
+        pageCalibrationDao.observeAllForDocument(pidDocumentId)
+
+    /** One-shot fetch of a single page's calibration, or null if none saved yet. */
+    suspend fun getPageCalibration(pidDocumentId: String, pageNumber: Int) =
+        pageCalibrationDao.getForPage(pidDocumentId, pageNumber)
 
     suspend fun reParse(pidDocumentId: String, projectId: String) =
         parsePidDocument(pidDocumentId, projectId)

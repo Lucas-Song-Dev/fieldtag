@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.fieldtag.data.db.entities.InstrumentEntity
 import com.fieldtag.data.db.entities.OverlayShape
 import com.fieldtag.data.db.entities.PidDocumentEntity
+import com.fieldtag.data.db.entities.PidPageCalibrationEntity
 import com.fieldtag.data.db.entities.ProjectEntity
 import com.fieldtag.domain.ocr.OcrTagDetector
 import com.fieldtag.domain.parser.IsaTagDetector
@@ -31,6 +32,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +70,8 @@ data class ProjectDetailUiState(
     val diagramSearchQuery: String = "",
     val isDiagramSearchActive: Boolean = false,
     val diagramCenteredInstrumentId: String? = null,
+    /** Per-page calibration overrides keyed by 1-based page number. */
+    val pageCalibrations: Map<Int, PidPageCalibrationEntity> = emptyMap(),
 ) {
     /** Filtered + sorted instrument list based on current search/sort state. */
     fun filteredInstruments(): List<InstrumentEntity> = applyFilterAndSort(instruments, searchQuery, sortOrder)
@@ -121,6 +128,18 @@ class ProjectDetailViewModel @Inject constructor(
             mediaRepository.observeUngroupedCount(projectId).collect { count ->
                 _uiState.update { it.copy(ungroupedCount = count) }
             }
+        }
+        // Observe per-page calibrations for the first P&ID document of this project
+        viewModelScope.launch {
+            @OptIn(ExperimentalCoroutinesApi::class)
+            pidRepository.observeByProject(projectId)
+                .flatMapLatest { docs ->
+                    val firstDocId = docs.firstOrNull()?.id
+                    if (firstDocId == null) flowOf(emptyList())
+                    else pidRepository.observePageCalibrations(firstDocId)
+                }
+                .map { list -> list.associateBy { it.pageNumber } }
+                .collect { map -> _uiState.update { it.copy(pageCalibrations = map) } }
         }
     }
 

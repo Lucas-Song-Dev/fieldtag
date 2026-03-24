@@ -18,6 +18,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "com.fieldtag.HiltTestRunner"
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
     }
 
     buildTypes {
@@ -27,6 +28,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Installable on real devices without a release keystore: uses the same auto-generated
+            // debug keystore as `assembleDebug`. Replace with a real `signingConfig` for Play Store.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -41,6 +45,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {
@@ -76,6 +81,7 @@ ksp {
 dependencies {
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
@@ -150,7 +156,11 @@ dependencies {
     androidTestImplementation(libs.truth)
     androidTestImplementation(libs.hilt.android.testing)
     androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.espresso.core)
+    androidTestImplementation(libs.espresso.accessibility)
     kaptAndroidTest(libs.hilt.compiler)
+
+    androidTestUtil(libs.androidx.test.orchestrator)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

@@ -30,10 +30,14 @@ data class CalibrateUiState(
      */
     val boxCenterX: Float = 0.5f,
     val boxCenterY: Float = 0.5f,
-    val boxWidth: Float  = 0.06f,
+    val boxWidth: Float = 0.06f,
     val boxHeight: Float = 0.06f,
     /** Shape currently selected for calibration. */
     val boxShape: OverlayShape = OverlayShape.RECTANGLE,
+    /** Current page displayed (0-based). */
+    val currentPage: Int = 0,
+    /** Total pages in the PDF, 0 until first render. */
+    val totalPages: Int = 0,
 )
 
 @HiltViewModel
@@ -44,7 +48,13 @@ class DiagramCalibrateViewModel @Inject constructor(
 
     val pidDocumentId: String = checkNotNull(savedStateHandle["pidDocumentId"])
 
-    private val _uiState = MutableStateFlow(CalibrateUiState())
+    /**
+     * Page to open first. 0-based index from nav args (defaults to 0 = first page).
+     * The route passes this as the `page` query parameter.
+     */
+    private val initialPage: Int = savedStateHandle.get<Int>("pageNumber") ?: 0
+
+    private val _uiState = MutableStateFlow(CalibrateUiState(currentPage = initialPage))
     val uiState: StateFlow<CalibrateUiState> = _uiState
 
     /** Emitted once after the calibration is saved — UI navigates on receipt. */
@@ -52,27 +62,49 @@ class DiagramCalibrateViewModel @Inject constructor(
     val calibrated: SharedFlow<Unit> = _calibrated
 
     init {
-        viewModelScope.launch { renderFirstPage() }
+        viewModelScope.launch { renderPage(initialPage) }
     }
 
-    private suspend fun renderFirstPage() {
+    private suspend fun renderPage(pageIndex: Int) {
         val doc = pidRepository.getById(pidDocumentId) ?: run {
             _uiState.update { it.copy(isLoading = false, errorMessage = "Document not found") }
             return
         }
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         withContext(Dispatchers.IO) {
             try {
                 val file = File(doc.filePath)
                 val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = PdfRenderer(pfd)
-                val page = renderer.openPage(0)
+                val totalPages = renderer.pageCount
+                val safeIndex = pageIndex.coerceIn(0, totalPages - 1)
+                val page = renderer.openPage(safeIndex)
                 val bitmap = Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888)
                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 page.close()
                 renderer.close()
                 pfd.close()
+
+                // Resolve initial box size: per-page → doc-level → defaults
+                // Page numbers in the DB are 1-based (matches InstrumentEntity.pidPageNumber)
+                val pageCalib = pidRepository.getPageCalibration(pidDocumentId, safeIndex + 1)
+                val initW = pageCalib?.calibrationWidth ?: doc.calibrationWidth ?: 0.06f
+                val initH = pageCalib?.calibrationHeight ?: doc.calibrationHeight ?: 0.06f
+                val initShape = pageCalib?.calibrationShape ?: doc.calibrationShape
+
                 withContext(Dispatchers.Main) {
-                    _uiState.update { it.copy(pageBitmap = bitmap, isLoading = false) }
+                    _uiState.value.pageBitmap?.recycle()
+                    _uiState.update {
+                        it.copy(
+                            pageBitmap = bitmap,
+                            isLoading = false,
+                            currentPage = safeIndex,
+                            totalPages = totalPages,
+                            boxWidth = initW,
+                            boxHeight = initH,
+                            boxShape = initShape,
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -80,6 +112,11 @@ class DiagramCalibrateViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** Navigate to a different page within the calibration screen. */
+    fun goToPage(newPage: Int) {
+        viewModelScope.launch { renderPage(newPage) }
     }
 
     /** Update the box center while the user drags it (normalized coords). */
@@ -104,34 +141,34 @@ class DiagramCalibrateViewModel @Inject constructor(
             val newCx: Float
             val newCy: Float
             when (cornerIndex) {
-                0 -> { // top-left: drag expands left and up
-                    newW  = (s.boxWidth  - dx).coerceAtLeast(minSize)
-                    newH  = (s.boxHeight - dy).coerceAtLeast(minSize)
-                    newCx = s.boxCenterX - (newW - s.boxWidth)  / 2f
+                0 -> {
+                    newW = (s.boxWidth - dx).coerceAtLeast(minSize)
+                    newH = (s.boxHeight - dy).coerceAtLeast(minSize)
+                    newCx = s.boxCenterX - (newW - s.boxWidth) / 2f
                     newCy = s.boxCenterY - (newH - s.boxHeight) / 2f
                 }
-                1 -> { // top-right
-                    newW  = (s.boxWidth  + dx).coerceAtLeast(minSize)
-                    newH  = (s.boxHeight - dy).coerceAtLeast(minSize)
-                    newCx = s.boxCenterX + (newW - s.boxWidth)  / 2f
+                1 -> {
+                    newW = (s.boxWidth + dx).coerceAtLeast(minSize)
+                    newH = (s.boxHeight - dy).coerceAtLeast(minSize)
+                    newCx = s.boxCenterX + (newW - s.boxWidth) / 2f
                     newCy = s.boxCenterY - (newH - s.boxHeight) / 2f
                 }
-                2 -> { // bottom-right
-                    newW  = (s.boxWidth  + dx).coerceAtLeast(minSize)
-                    newH  = (s.boxHeight + dy).coerceAtLeast(minSize)
-                    newCx = s.boxCenterX + (newW - s.boxWidth)  / 2f
+                2 -> {
+                    newW = (s.boxWidth + dx).coerceAtLeast(minSize)
+                    newH = (s.boxHeight + dy).coerceAtLeast(minSize)
+                    newCx = s.boxCenterX + (newW - s.boxWidth) / 2f
                     newCy = s.boxCenterY + (newH - s.boxHeight) / 2f
                 }
-                else -> { // bottom-left
-                    newW  = (s.boxWidth  - dx).coerceAtLeast(minSize)
-                    newH  = (s.boxHeight + dy).coerceAtLeast(minSize)
-                    newCx = s.boxCenterX - (newW - s.boxWidth)  / 2f
+                else -> {
+                    newW = (s.boxWidth - dx).coerceAtLeast(minSize)
+                    newH = (s.boxHeight + dy).coerceAtLeast(minSize)
+                    newCx = s.boxCenterX - (newW - s.boxWidth) / 2f
                     newCy = s.boxCenterY + (newH - s.boxHeight) / 2f
                 }
             }
             s.copy(
-                boxWidth   = newW.coerceAtMost(0.5f),
-                boxHeight  = newH.coerceAtMost(0.5f),
+                boxWidth = newW.coerceAtMost(0.5f),
+                boxHeight = newH.coerceAtMost(0.5f),
                 boxCenterX = newCx.coerceIn(newW / 2f, 1f - newW / 2f),
                 boxCenterY = newCy.coerceIn(newH / 2f, 1f - newH / 2f),
             )
@@ -143,17 +180,28 @@ class DiagramCalibrateViewModel @Inject constructor(
         _uiState.update { s ->
             val next = when (s.boxShape) {
                 OverlayShape.RECTANGLE -> OverlayShape.DIAMOND
-                OverlayShape.DIAMOND   -> OverlayShape.RECTANGLE
+                OverlayShape.DIAMOND -> OverlayShape.RECTANGLE
             }
             s.copy(boxShape = next)
         }
     }
 
-    /** Persist the current box size + shape and emit a navigation event. */
+    /**
+     * Persist the current box size + shape for the current page.
+     *
+     * - Always saves a per-page row for the current page.
+     * - For page 1 (index 0) also updates the document-level columns so it acts as the
+     *   global default for all pages that have no specific calibration.
+     */
     fun confirmCalibration() {
         viewModelScope.launch {
             val s = _uiState.value
-            pidRepository.updateCalibration(pidDocumentId, s.boxWidth, s.boxHeight, s.boxShape)
+            val pageNumber1Based = s.currentPage + 1  // DB is 1-based
+            pidRepository.upsertPageCalibration(pidDocumentId, pageNumber1Based, s.boxWidth, s.boxHeight, s.boxShape)
+            // Page 1 always doubles as the document-level default
+            if (s.currentPage == 0) {
+                pidRepository.updateCalibration(pidDocumentId, s.boxWidth, s.boxHeight, s.boxShape)
+            }
             _calibrated.emit(Unit)
         }
     }
